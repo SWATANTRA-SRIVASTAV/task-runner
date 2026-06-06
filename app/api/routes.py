@@ -127,6 +127,21 @@ async def cancel_job(
     repo.update_job(job)
     return {"id": job_id, "status": "cancelled"}
 
+@router.get("/stats")
+async def get_stats(repo: JobRepository = Depends(get_repository)):
+    """
+    Returns total job count and a breakdown by status.
+
+    Uses a SQL GROUP BY — not a Python-side aggregation — so it stays
+    fast regardless of how many jobs are in the database.
+    """
+    counts = repo.get_job_counts_by_status()
+    total = sum(counts.values())
+    return {
+        "total": total,
+        "by_status": counts,
+    }
+
 
 @router.get("/jobs/{job_id}/logs")
 async def stream_logs(

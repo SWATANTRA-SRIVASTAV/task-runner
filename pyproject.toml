@@ -3,3 +3,8 @@ testpaths = ["tests"]
 asyncio_mode = "auto"
 log_cli = true
 log_cli_level = "DEBUG"
+filterwarnings = [
+    "ignore::DeprecationWarning:dateutil",
+    "ignore::DeprecationWarning:docker",
+    "ignore::DeprecationWarning",
+]
