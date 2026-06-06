@@ -2,7 +2,7 @@ import asyncio
 import tempfile
 import os
 import pytest
-from datetime import datetime, timezone
+from datetime import datetime
 
 from app.core.models import Job, JobSpec, JobStatus, FailureReason
 from app.db.repository import JobRepository
@@ -12,7 +12,7 @@ def _make_running_job(container_id: str = "abc123deadbeef") -> Job:
     job = Job(spec=JobSpec(image="alpine:latest", command=["sleep", "999"]))
     job.status = JobStatus.RUNNING
     job.container_id = container_id
-    job.started_at = datetime.now(timezone.utc).replace(tzinfo=None)
+    job.started_at = datetime.utcnow()
     return job
 
 
@@ -44,7 +44,7 @@ class TestReconciliationLogic:
         job.status = JobStatus.FAILED
         job.failure_reason = FailureReason.DOCKER_ERROR
         job.error_message = "Orphaned on daemon restart — container was already gone"
-        job.finished_at = datetime.now(timezone.utc).replace(tzinfo=None)
+        job.finished_at = datetime.utcnow()
         self.repo.update_job(job)
 
         fetched = self.repo.get_job(job.id)
@@ -60,7 +60,7 @@ class TestReconciliationLogic:
         job.status = JobStatus.FAILED
         job.failure_reason = FailureReason.DOCKER_ERROR
         job.error_message = "Orphaned on daemon restart — container was already gone"
-        job.finished_at = datetime.now(timezone.utc).replace(tzinfo=None)
+        job.finished_at = datetime.utcnow()
         self.repo.update_job(job)
 
         pending = self.repo.get_pending_jobs()
