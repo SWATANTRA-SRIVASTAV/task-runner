@@ -8,7 +8,7 @@ we can swap the storage backend without touching business logic.
 
 import uuid
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
 from enum import Enum
 from typing import Optional
 

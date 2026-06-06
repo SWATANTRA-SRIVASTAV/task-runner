@@ -18,7 +18,7 @@ leaves orphaned containers.
 import asyncio
 import logging
 import signal
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional
 
 from app.core.container import ContainerManager, DockerOperationError
@@ -49,14 +49,59 @@ class JobScheduler:
     # ------------------------------------------------------------------ #
 
     async def start(self) -> None:
-        """
-        Starts the dispatch loop and registers signal handlers for graceful
-        shutdown. Call this from your FastAPI lifespan or main coroutine.
-        """
         self._running = True
         self._register_signal_handlers()
+        await self.reconcile_orphaned_jobs()
         logger.info("Scheduler started (max_concurrent=%d)", self._semaphore._value)
         await self._dispatch_loop()
+
+    async def reconcile_orphaned_jobs(self) -> None:
+        running_jobs = await asyncio.to_thread(
+            self._repo.list_jobs, status=JobStatus.RUNNING
+        )
+        if not running_jobs:
+            logger.info("Reconciliation: no orphaned jobs found")
+            return
+
+        logger.warning(
+            "Reconciliation: found %d job(s) stuck in RUNNING — daemon likely crashed",
+            len(running_jobs),
+        )
+
+        for job in running_jobs:
+            container_still_alive = False
+
+            if job.container_id:
+                try:
+                    await asyncio.to_thread(
+                        self._containers._client.containers.get, job.container_id
+                    )
+                    container_still_alive = True
+                    logger.warning(
+                        "Reconciliation: container %s still alive for job %s — force removing",
+                        job.container_id[:12],
+                        job.id,
+                    )
+                    await asyncio.to_thread(
+                        self._containers.remove_container, job.container_id, True
+                    )
+                except Exception:
+                    logger.info(
+                        "Reconciliation: container %s already gone for job %s",
+                        job.container_id[:12],
+                        job.id,
+                    )
+
+            job.status = JobStatus.FAILED
+            job.failure_reason = FailureReason.DOCKER_ERROR
+            job.error_message = (
+                "Orphaned on daemon restart — container was still alive and force-killed"
+                if container_still_alive
+                else "Orphaned on daemon restart — container was already gone"
+            )
+            job.finished_at = datetime.now(timezone.utc).replace(tzinfo=None)
+            await asyncio.to_thread(self._repo.update_job, job)
+            logger.warning("Reconciliation: marked job %s as FAILED", job.id)
 
     async def shutdown(self) -> None:
         """
@@ -125,7 +170,7 @@ class JobScheduler:
                 else:
                     # Either exhausted retries or non-retryable failure
                     job.status = JobStatus.FAILED
-                    job.finished_at = datetime.utcnow()
+                    job.finished_at = datetime.now(timezone.utc).replace(tzinfo=None)
                     await asyncio.to_thread(self._repo.update_job, job)
                     logger.warning(
                         "Job %s permanently failed after %d attempt(s): %s",
@@ -154,7 +199,7 @@ class JobScheduler:
             )
             job.container_id = container_id
             job.status = JobStatus.RUNNING
-            job.started_at = datetime.utcnow()
+            job.started_at = datetime.now(timezone.utc).replace(tzinfo=None)
             await asyncio.to_thread(self._repo.update_job, job)
 
             # --- Start ---
@@ -172,7 +217,7 @@ class JobScheduler:
 
             if result.succeeded:
                 job.status = JobStatus.SUCCESS
-                job.finished_at = datetime.utcnow()
+                job.finished_at = datetime.now(timezone.utc).replace(tzinfo=None)
                 await asyncio.to_thread(self._repo.update_job, job)
                 logger.info("Job %s succeeded (exit 0)", job.id)
                 return True
