@@ -143,10 +143,25 @@ class ContainerManager:
             return ContainerResult(exit_code=exit_code, oom_killed=oom_killed)
 
         except Exception as exc:
-            error_str = str(exc).lower()
-            if "timeout" in error_str or "timed out" in error_str or "readtimeout" in error_str:
-                raise TimeoutError(f"Container {container_id} timed out after {timeout}s") from exc
-            raise DockerOperationError(f"Error waiting for container {container_id}: {exc}") from exc
+            # The Docker SDK raises requests.exceptions.ReadTimeout on Mac/Linux
+            # when container.wait(timeout=N) expires. We catch it by checking the
+            # exception class name rather than string matching, since the import
+            # path differs between docker-py versions.
+            exc_type = type(exc).__name__
+            exc_module = type(exc).__module__
+            is_timeout = (
+                "timeout" in exc_type.lower()
+                or "timeout" in str(exc).lower()
+                or "timed out" in str(exc).lower()
+                or "readtimeout" in exc_module.lower()
+            )
+            if is_timeout:
+                raise TimeoutError(
+                    f"Container {container_id} timed out after {timeout}s"
+                ) from exc
+            raise DockerOperationError(
+                f"Error waiting for container {container_id}: {exc}"
+            ) from exc
 
     def stream_logs(self, container_id: str) -> Generator[str, None, None]:
         """
