@@ -143,8 +143,8 @@ class ContainerManager:
             return ContainerResult(exit_code=exit_code, oom_killed=oom_killed)
 
         except Exception as exc:
-            # Distinguish timeout from other errors
-            if "timeout" in str(exc).lower():
+            error_str = str(exc).lower()
+            if "timeout" in error_str or "timed out" in error_str or "readtimeout" in error_str:
                 raise TimeoutError(f"Container {container_id} timed out after {timeout}s") from exc
             raise DockerOperationError(f"Error waiting for container {container_id}: {exc}") from exc
 
@@ -164,6 +164,24 @@ class ContainerManager:
         except APIError as exc:
             logger.error("Log stream error for container %s: %s", container_id, exc)
 
+    def stop_container(self, container_id: str, timeout_seconds: int = 5) -> None:
+        """
+        Sends SIGTERM to the container process, waits up to timeout_seconds,
+        then sends SIGKILL if it hasn't stopped.
+
+        Used in the timeout path — we want a clean shutdown attempt before
+        force-removing. Some jobs trap SIGTERM and flush state cleanly.
+        We give them 5 seconds then kill regardless.
+        """
+        try:
+            container = self._client.containers.get(container_id)
+            container.stop(timeout=timeout_seconds)
+            logger.info("Stopped container %s (SIGTERM + grace period)", container_id)
+        except NotFound:
+            logger.debug("Container %s already gone when stop was called", container_id)
+        except APIError as exc:
+            logger.error("Failed to stop container %s: %s — will attempt force remove", container_id, exc)
+    
     def remove_container(self, container_id: str, force: bool = False) -> None:
         """
         Idempotent — silently ignores NotFound. Safe to call in finally blocks.
