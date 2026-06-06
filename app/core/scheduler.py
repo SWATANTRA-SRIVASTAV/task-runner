@@ -225,8 +225,16 @@ class JobScheduler:
                 return False  # caller decides whether to retry
 
         except TimeoutError:
+            # The container is still running — wait() timed out but did not
+            # stop the container. We must stop it explicitly here.
+            # The finally block will remove it, but stopping first gives the
+            # process a chance to flush any state via SIGTERM.
+            if container_id:
+                await asyncio.to_thread(
+                    self._containers.stop_container, container_id, 5
+                )
             job.failure_reason = FailureReason.TIMEOUT
-            job.error_message = f"Timed out after {job.spec.timeout_seconds}s"
+            job.error_message = f"Exceeded timeout of {job.spec.timeout_seconds}s — container stopped"
             return False
 
         except DockerOperationError as exc:
