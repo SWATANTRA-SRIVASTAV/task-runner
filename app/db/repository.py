@@ -20,7 +20,7 @@ import json
 import logging
 import sqlite3
 from contextlib import contextmanager
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Generator, List, Optional
 
@@ -177,6 +177,21 @@ class JobRepository:
                     (limit, offset),
                 ).fetchall()
         return [self._from_row(r) for r in rows]
+    
+    def get_job_counts_by_status(self) -> dict:
+        """
+        Returns a dict of {status_string: count} using a single SQL GROUP BY.
+
+        This exists because an earlier version loaded all jobs into Python
+        and counted them with a dict comprehension — fine for 100 jobs,
+        silently catastrophic for 100,000. The GROUP BY runs in SQLite and
+        returns only the aggregated rows regardless of table size.
+        """
+        with self._conn() as conn:
+            rows = conn.execute(
+                "SELECT status, COUNT(*) as cnt FROM jobs GROUP BY status"
+            ).fetchall()
+        return {row["status"]: row["cnt"] for row in rows}
 
     # ------------------------------------------------------------------ #
     #  Row ↔ Model translation                                            #
