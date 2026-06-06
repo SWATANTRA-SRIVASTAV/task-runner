@@ -1,0 +1,28 @@
+services:
+  task-runner:
+    build:
+      context: .
+      target: runtime      # use the production stage even locally
+    ports:
+      - "8000:8000"
+    volumes:
+      # Mount the Docker socket so the runner can talk to the host daemon.
+      # This is the standard approach for Docker-in-Docker use cases where
+      # you want jobs to run as sibling containers, not nested containers.
+      # Security implication: anything with socket access can control Docker.
+      # In production, use a dedicated Docker daemon or a socket proxy.
+      - /var/run/docker.sock:/var/run/docker.sock
+      # Persist the SQLite DB across container restarts
+      - task-runner-data:/app/data
+    environment:
+      - DB_PATH=/app/data/jobs.db
+      - MAX_CONCURRENT_JOBS=4
+      - LOG_LEVEL=INFO
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/healthz')"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+
+volumes:
+  task-runner-data:
